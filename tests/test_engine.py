@@ -96,10 +96,59 @@ def test_scroll_down_direction(wheel: BilresaWheel) -> None:
     assert action.notches == 2
 
 
-def test_press_variants_ignored_for_rotate(wheel: BilresaWheel) -> None:
+@pytest.mark.parametrize(
+    ("endpoint", "role", "direction"),
+    [(1, ROLE_SCROLL_UP, DIRECTION_UP), (2, ROLE_SCROLL_DOWN, DIRECTION_DOWN)],
+)
+def test_initial_notch_is_immediate_and_not_counted_twice(
+    wheel: BilresaWheel, endpoint: int, role: str, direction: str
+) -> None:
     engine = GestureEngine()
-    assert engine.process(wheel, _decoded(1, ROLE_SCROLL_UP, "initial_press")) is None
-    assert engine.process(wheel, _decoded(1, ROLE_SCROLL_UP, "short_release")) is None
+    for _ in range(2):
+        action = engine.process(wheel, _decoded(endpoint, role, "initial_press"))
+        assert action.type == ACTION_ROTATE
+        assert action.direction == direction
+        assert action.notches == 1
+        for event, count in [
+            ("short_release", None),
+            ("multi_press_ongoing", 1),
+            ("multi_press_complete", 1),
+        ]:
+            assert engine.process(wheel, _decoded(endpoint, role, event, count)) is None
+
+
+def test_batched_scroll_with_repeated_initial_events(wheel: BilresaWheel) -> None:
+    engine = GestureEngine()
+    # InitialPress repeats during real wheel gestures; only the first is early.
+    deltas = []
+    for event, count in [
+        ("initial_press", None),
+        ("short_release", None),
+        ("initial_press", None),
+        ("multi_press_ongoing", 6),
+        ("initial_press", None),
+        ("multi_press_ongoing", 12),
+        ("multi_press_ongoing", 12),
+        ("multi_press_complete", 18),
+    ]:
+        action = engine.process(wheel, _decoded(1, ROLE_SCROLL_UP, event, count))
+        if action is not None:
+            deltas.append(action.notches)
+    assert deltas == [1, 5, 6, 6]
+
+
+def test_early_notch_state_is_independent_and_resettable(wheel: BilresaWheel) -> None:
+    engine = GestureEngine()
+    for endpoint, role in [(1, ROLE_SCROLL_UP), (2, ROLE_SCROLL_DOWN)]:
+        assert (
+            engine.process(wheel, _decoded(endpoint, role, "initial_press")).notches
+            == 1
+        )
+    engine.reset()
+    assert (
+        engine.process(wheel, _decoded(1, ROLE_SCROLL_UP, "initial_press")).notches == 1
+    )
+    assert engine.process(wheel, _decoded(3, ROLE_BUTTON, "initial_press")) is None
 
 
 @pytest.mark.parametrize(("count", "presses"), [(1, 1), (2, 2), (3, 3)])

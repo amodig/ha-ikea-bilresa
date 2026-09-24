@@ -5,7 +5,8 @@ The device reports a scroll as a stream of ``multi_press_ongoing`` events whose
 by several notches at a time (the wheel batches them behind a ~1 s anti-flood
 delay), followed by a ``multi_press_complete`` with the final total. To move a
 light by the right amount in real time we therefore track the running count per
-endpoint and emit the **delta** on every update.
+endpoint and emit the **delta** on every update. The first ``initial_press``
+emits one notch immediately, which is deducted from the later cumulative count.
 
 State is keyed by ``(node_id, endpoint_id)``, so any number of wheels and
 channels are handled independently.
@@ -23,6 +24,7 @@ from .const import (
     ACTION_ROTATE,
     DIRECTION_DOWN,
     DIRECTION_UP,
+    EVT_INITIAL_PRESS,
     EVT_LONG_PRESS,
     EVT_LONG_RELEASE,
     EVT_MULTI_PRESS_COMPLETE,
@@ -37,6 +39,7 @@ from .model import BilresaWheel
 _LOGGER = logging.getLogger(__name__)
 
 _ONGOING = SWITCH_EVENT_NAMES[EVT_MULTI_PRESS_ONGOING]
+_INITIAL = SWITCH_EVENT_NAMES[EVT_INITIAL_PRESS]
 _COMPLETE = SWITCH_EVENT_NAMES[EVT_MULTI_PRESS_COMPLETE]
 _LONG_PRESS = SWITCH_EVENT_NAMES[EVT_LONG_PRESS]
 _LONG_RELEASE = SWITCH_EVENT_NAMES[EVT_LONG_RELEASE]
@@ -79,9 +82,14 @@ class GestureEngine:
         count = decoded.get("count")
         key = (wheel.node_id, decoded["endpoint_id"])
 
-        if event_type == _ONGOING and count is not None:
+        if event_type == _INITIAL:
+            if self._counts.get(key, 0):
+                return None  # InitialPress can repeat within the same gesture.
+            delta = 1
+            self._counts[key] = 1
+        elif event_type == _ONGOING and count is not None:
             last = self._counts.get(key, 0)
-            if count <= last:  # counter wrapped -> a new gesture started
+            if count < last:  # counter wrapped -> a new gesture started
                 last = 0
             delta = count - last
             self._counts[key] = count
@@ -92,7 +100,7 @@ class GestureEngine:
             delta = count - last
             self._counts[key] = 0  # gesture finished, reset baseline
         else:
-            # initial_press / short_release / long_* carry no scroll delta
+            # short_release / long_* carry no scroll delta
             return None
 
         if delta <= 0:
