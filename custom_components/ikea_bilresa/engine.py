@@ -22,6 +22,7 @@ from .const import (
     ACTION_PRESS,
     ACTION_RELEASE,
     ACTION_ROTATE,
+    ACTION_SHORT_RELEASE,
     DIRECTION_DOWN,
     DIRECTION_UP,
     EVT_INITIAL_PRESS,
@@ -29,6 +30,7 @@ from .const import (
     EVT_LONG_RELEASE,
     EVT_MULTI_PRESS_COMPLETE,
     EVT_MULTI_PRESS_ONGOING,
+    EVT_SHORT_RELEASE,
     ROLE_BUTTON,
     ROLE_SCROLL_DOWN,
     ROLE_SCROLL_UP,
@@ -43,6 +45,7 @@ _INITIAL = SWITCH_EVENT_NAMES[EVT_INITIAL_PRESS]
 _COMPLETE = SWITCH_EVENT_NAMES[EVT_MULTI_PRESS_COMPLETE]
 _LONG_PRESS = SWITCH_EVENT_NAMES[EVT_LONG_PRESS]
 _LONG_RELEASE = SWITCH_EVENT_NAMES[EVT_LONG_RELEASE]
+_SHORT_RELEASE = SWITCH_EVENT_NAMES[EVT_SHORT_RELEASE]
 
 
 @dataclass(slots=True)
@@ -53,7 +56,7 @@ class WheelAction:
     wheel_name: str
     channel: int | None
     endpoint_id: int
-    type: str  # ACTION_ROTATE / _PRESS / _HOLD / _RELEASE
+    type: str  # ACTION_ROTATE / _PRESS / _HOLD / _RELEASE / _SHORT_RELEASE
     direction: str | None = None  # DIRECTION_UP / DIRECTION_DOWN for rotate
     notches: int = 0  # rotate delta (this event only)
     presses: int = 0  # 1 / 2 / 3 for press
@@ -124,6 +127,9 @@ class GestureEngine:
             "channel": decoded["channel"],
             "endpoint_id": decoded["endpoint_id"],
         }
+        if event_type == _SHORT_RELEASE:
+            # Opt-in event: existing completed-click bindings keep their semantics.
+            return WheelAction(**base, type=ACTION_SHORT_RELEASE)
         if event_type == _COMPLETE:
             presses = decoded.get("count") or 1
             return WheelAction(**base, type=ACTION_PRESS, presses=presses)
@@ -131,7 +137,7 @@ class GestureEngine:
             return WheelAction(**base, type=ACTION_HOLD)
         if event_type == _LONG_RELEASE:
             return WheelAction(**base, type=ACTION_RELEASE)
-        # initial_press / short_release / ongoing -> not actionable on a button
+        # initial_press / ongoing -> not actionable on a button
         return None
 
     def reset(self) -> None:
